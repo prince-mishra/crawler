@@ -1,15 +1,17 @@
 __author__ = 'prince'
 
 import requests
+import grequests
 import BeautifulSoup
 import Queue
 import urlparse
+import threading
+from sqlobject import *
+import sqlite3 as sqlite
+import time
+from requests import async
 
-a_list_queue = Queue.Queue()
-repositories = []
-max_urls = 500
-
-def _get_html_from_url(url):
+def _get_html_from_response_obj(response_obj):
     """
     fetches the resource pointed to by the url.
 
@@ -31,18 +33,14 @@ def _get_html_from_url(url):
     valid_content_types = ['text/html']
     try:
         print "fetching html"
-        r   = requests.get(url) # this allows us to get headers first and content later
-        print r.status_code, "\nheaaders"
-        print r.headers, "\nBODY\n"
-        print r.content
-        valid_status_code = r.status_code == 200
-        content_type = r.headers.get('content-type', False)
+        print response_obj.status_code
+        valid_status_code = response_obj.status_code == 200
+        content_type = response_obj.headers.get('content-type', False)
         valid_content_type = content_type.startswith(valid_content_types[0])
         print "\ncontent type", content_type, valid_content_type
         if  valid_status_code and valid_content_type :
             #wow. valid response
-            html        = r.content
-            print "html\n\n", html
+            html        = response_obj.content
     except Exception, fault:
         print "exception"
         print str(fault)
@@ -129,11 +127,115 @@ def _path_join(base, edge):
     """
     return base + '/' + edge if edge else base
 
+raw_url_queue = Queue.Queue()
+
+
+def connect_db(db_path):
+    connection_string = 'sqlite:' + db_path
+    connection = connectionForURI(connection_string)
+    sqlhub.processConnection = connection
+
+def init_db():
+    Url.createTable(ifNotExists=True)
+
+class Url(SQLObject):
+    url      = UnicodeCol(length = 1024, unique = True) # lets ensure unique links at db level as well
+    visited = BoolCol(default = False)
+
+
+class UrlFetcher (threading.Thread):
+    def __init__(self, threadID, name, delay):
+        threading.Thread.__init__(self)
+        self.threadID = threadID
+        self.name = name
+        self.cur_url = 0
+        self.max_urls = 5
+        self.delay = delay
+
+    def run(self):
+        print "Starting " + self.name
+        while self.cur_url < self.max_urls:
+            # Get lock to synchronize threads
+            #threading.Lock.acquire()
+            print_time(self.name, self.cur_url)
+            # Free lock to release next thread
+            #threading.Lock.release()
+            time.sleep(self.delay)
+            self.cur_url += 1
+
+def print_time(threadName, cur_url):
+    print "%s: %s: %s" % (threadName, cur_url, time.ctime(time.time()))
+
+def run_threads():
+
+    threadLock = threading.Lock()
+
 if __name__=="__main__":
-    url = 'https://facebook.com'
+    """url = 'https://facebook.com'
     html = _get_html_from_url(url)
     anchor_tags = _get_anchor_tags_from_html(html)
     valid_links = _get_valid_links_from_anchor_list(anchor_tags, url)
     #print _find_isolated_resources(url)
-    print valid_links
+    print valid_links"""
+    connect_db('urls.db')
+    init_db()
+
+    threads = []
+    """q = Queue.Queue()
+    # Create new threads
+    thread1 = UrlFetcher(1, "Thread-1", q)
+    thread2 = UrlFetcher(2, "Thread-2", q)
+
+    # Start new Threads
+    thread1.daemon = True
+    thread2.daemon = True
+    thread1.start()
+    thread2.start()
+
+    # Add threads to thread list
+    threads.append(thread1)
+    threads.append(thread2)
+    """
+    cur_count = Url.select().count()
+    max_count = 500
+    while cur_count < max_count:
+        if cur_count == 0:
+            # new db. seed url
+            Url(url = 'http://python.org')
+        query = Url.select()
+        query = query.filter(Url.q.visited == False)
+        count = query.count()
+        if not count:
+            break;
+        print "inside while"
+        urls = []
+        for u in list(query.limit(1)):
+            urls.append(u.url)
+            u.visited = True
+        print urls
+        rs = (grequests.get(u) for u in urls)
+        i = 0
+        links = []
+        for item in grequests.map(rs, False, 5):
+            html = _get_html_from_response_obj(item)
+            anchor_tags = _get_anchor_tags_from_html(html)
+            valid_links = _get_valid_links_from_anchor_list(anchor_tags, urls[i])
+            links += valid_links
+            i += 1
+        for l in links:
+            try:
+                if not cur_count < max_count:
+                    break
+                nurl = Url(url = l)
+            except Exception, fault:
+                print str(fault)
+            else:
+                cur_count += 1
+                print "\n\ncurcount", cur_count
+    #query = query.limit(5)
+
+    # Wait for all threads to complete
+    for t in threads:
+        t.join()
+    print "Exiting Main Thread"
 
