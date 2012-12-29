@@ -32,17 +32,14 @@ def _get_html_from_response_obj(response_obj):
     html = ''
     valid_content_types = ['text/html']
     try:
-        print "fetching html"
-        print response_obj.status_code
         valid_status_code = response_obj.status_code == 200
         content_type = response_obj.headers.get('content-type', False)
         valid_content_type = content_type.startswith(valid_content_types[0])
-        print "\ncontent type", content_type, valid_content_type
         if  valid_status_code and valid_content_type :
             #wow. valid response
             html        = response_obj.content
     except Exception, fault:
-        print "exception"
+        print "Error occured while fetching html"
         print str(fault)
     return html
 
@@ -127,9 +124,6 @@ def _path_join(base, edge):
     """
     return base + '/' + edge if edge else base
 
-raw_url_queue = Queue.Queue()
-
-
 def connect_db(db_path):
     connection_string = 'sqlite:' + db_path
     connection = connectionForURI(connection_string)
@@ -142,62 +136,11 @@ class Url(SQLObject):
     url      = UnicodeCol(length = 1024, unique = True) # lets ensure unique links at db level as well
     visited = BoolCol(default = False)
 
-
-class UrlFetcher (threading.Thread):
-    def __init__(self, threadID, name, delay):
-        threading.Thread.__init__(self)
-        self.threadID = threadID
-        self.name = name
-        self.cur_url = 0
-        self.max_urls = 5
-        self.delay = delay
-
-    def run(self):
-        print "Starting " + self.name
-        while self.cur_url < self.max_urls:
-            # Get lock to synchronize threads
-            #threading.Lock.acquire()
-            print_time(self.name, self.cur_url)
-            # Free lock to release next thread
-            #threading.Lock.release()
-            time.sleep(self.delay)
-            self.cur_url += 1
-
-def print_time(threadName, cur_url):
-    print "%s: %s: %s" % (threadName, cur_url, time.ctime(time.time()))
-
-def run_threads():
-
-    threadLock = threading.Lock()
-
 if __name__=="__main__":
-    """url = 'https://facebook.com'
-    html = _get_html_from_url(url)
-    anchor_tags = _get_anchor_tags_from_html(html)
-    valid_links = _get_valid_links_from_anchor_list(anchor_tags, url)
-    #print _find_isolated_resources(url)
-    print valid_links"""
     connect_db('urls.db')
     init_db()
-
-    threads = []
-    """q = Queue.Queue()
-    # Create new threads
-    thread1 = UrlFetcher(1, "Thread-1", q)
-    thread2 = UrlFetcher(2, "Thread-2", q)
-
-    # Start new Threads
-    thread1.daemon = True
-    thread2.daemon = True
-    thread1.start()
-    thread2.start()
-
-    # Add threads to thread list
-    threads.append(thread1)
-    threads.append(thread2)
-    """
     cur_count = Url.select().count()
-    max_count = 500
+    max_count = 800
     while cur_count < max_count:
         if cur_count == 0:
             # new db. seed url
@@ -207,9 +150,8 @@ if __name__=="__main__":
         count = query.count()
         if not count:
             break;
-        print "inside while"
         urls = []
-        for u in list(query.limit(1)):
+        for u in list(query.limit(5)):
             urls.append(u.url)
             u.visited = True
         print urls
@@ -231,11 +173,7 @@ if __name__=="__main__":
                 print str(fault)
             else:
                 cur_count += 1
-                print "\n\ncurcount", cur_count
-    #query = query.limit(5)
+                print "current count ", cur_count
 
-    # Wait for all threads to complete
-    for t in threads:
-        t.join()
-    print "Exiting Main Thread"
+    print "Exiting"
 
