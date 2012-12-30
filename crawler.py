@@ -1,15 +1,104 @@
 __author__ = 'prince'
 
 import requests
-import grequests
+import grequests # Requires gevent
 import BeautifulSoup
-import Queue
 import urlparse
-import threading
 from sqlobject import *
 import sqlite3 as sqlite
 import time
-from requests import async
+
+class Url(SQLObject):
+    url      = UnicodeCol(length = 1024, unique = True) # lets ensure unique links at db level
+    visited = BoolCol(default = False)
+
+class Crawler:
+    """
+    Web crawling for superhumans! this is superfast, super greedy!
+    """
+    def __init__(self, db_path, max_urls, seed_url = 'http://python.org'):
+        self.db_path    = db_path
+        self.max_urls   = max_urls
+        self.seed_url   = seed_url
+        self.max_parallel_connections = 5
+        self.connect_db()
+        self.init_db()
+        if self.uncrawled_links_count() == 0:
+            self.seed_db()
+
+    def start_crawling(self):
+        while not self.stop_condition():
+            urls            = self.get_uncrawled_urls(self.max_parallel_connections)
+            parsed_links    = self.fetch_and_parse(urls)
+            self.insert_to_db(parsed_links)
+
+    def fetch_and_parse(self, urls):
+        rs = (grequests.get(u) for u in urls)
+        i = 0
+        links = []
+        _PREFETCH = False
+        _MAX_PARALLEL_CONNECTIONS = self.max_parallel_connections
+        for item in grequests.map(rs, _PREFETCH, _MAX_PARALLEL_CONNECTIONS): #Parallel Fetch
+            html = _get_html_from_response_obj(item)
+            anchor_tags = _get_anchor_tags_from_html(html)
+            valid_links = _get_valid_links_from_anchor_list(anchor_tags, urls[i])
+            links += valid_links
+            i += 1
+        return links
+
+    def insert_to_db(self, links):
+        # remove duplicates, if any!
+        s = set(links)
+        unique_links = list(s)
+        total = len(unique_links)
+        success = 0
+        failed = 0
+        for item in unique_links:
+            if self.stop_condition():
+                break
+            try:
+                print "current strength ", self.total_links_count()
+                Url(url = item)
+            except Exception, fault:
+                print "insert failed. Error ", str(fault) # printing item here is not unicode safe!
+                failed += 1
+            else:
+                success += 1
+        return total, success, failed
+
+    def connect_db(self):
+        connection_string = 'sqlite:' + self.db_path
+        connection = connectionForURI(connection_string)
+        sqlhub.processConnection = connection
+
+    def init_db(self):
+        Url.createTable(ifNotExists=True)
+
+    def seed_db(self):
+        try:
+            Url(url = self.seed_url)
+        except Exception, fault:
+            print "Cannot create seed url"
+            raise
+
+    def uncrawled_links_count(self):
+        query = Url.select(Url.q.visited == False)
+        return query.count()
+
+    def total_links_count (self):
+        query = Url.select()
+        return query.count()
+
+    def get_uncrawled_urls(self, count):
+        query = Url.select(Url.q.visited == False).limit(count)
+        ret = []
+        for u in list(query):
+            u.visited = True
+            ret.append(u.url)
+        return ret
+
+    def stop_condition(self):
+        return self.total_links_count() > self.max_urls
 
 def _get_html_from_response_obj(response_obj):
     """
@@ -34,8 +123,10 @@ def _get_html_from_response_obj(response_obj):
     try:
         valid_status_code = response_obj.status_code == 200
         content_type = response_obj.headers.get('content-type', False)
-        valid_content_type = content_type.startswith(valid_content_types[0])
-        if  valid_status_code and valid_content_type :
+        content_type_valid = False
+        if content_type:
+            content_type_valid = content_type.startswith(valid_content_types[0])
+        if  valid_status_code and content_type_valid :
             #wow. valid response
             html        = response_obj.content
     except Exception, fault:
@@ -60,12 +151,6 @@ def _get_valid_links_from_anchor_list(a_list = [], base_url=''):
         if href:
             valid_links += _get_valid_links_list(base_url, href)
     return valid_links
-
-def _check_duplicate(repo, item):
-    """
-    check if item exists in repo
-    """
-    pass
 
 def _get_valid_links_list(url, href):
     """
@@ -124,56 +209,11 @@ def _path_join(base, edge):
     """
     return base + '/' + edge if edge else base
 
-def connect_db(db_path):
-    connection_string = 'sqlite:' + db_path
-    connection = connectionForURI(connection_string)
-    sqlhub.processConnection = connection
-
-def init_db():
-    Url.createTable(ifNotExists=True)
-
-class Url(SQLObject):
-    url      = UnicodeCol(length = 1024, unique = True) # lets ensure unique links at db level as well
-    visited = BoolCol(default = False)
-
 if __name__=="__main__":
-    connect_db('urls.db')
-    init_db()
-    cur_count = Url.select().count()
-    max_count = 800
-    while cur_count < max_count:
-        if cur_count == 0:
-            # new db. seed url
-            Url(url = 'http://python.org')
-        query = Url.select()
-        query = query.filter(Url.q.visited == False)
-        count = query.count()
-        if not count:
-            break;
-        urls = []
-        for u in list(query.limit(5)):
-            urls.append(u.url)
-            u.visited = True
-        print urls
-        rs = (grequests.get(u) for u in urls)
-        i = 0
-        links = []
-        for item in grequests.map(rs, False, 5):
-            html = _get_html_from_response_obj(item)
-            anchor_tags = _get_anchor_tags_from_html(html)
-            valid_links = _get_valid_links_from_anchor_list(anchor_tags, urls[i])
-            links += valid_links
-            i += 1
-        for l in links:
-            try:
-                if not cur_count < max_count:
-                    break
-                nurl = Url(url = l)
-            except Exception, fault:
-                print str(fault)
-            else:
-                cur_count += 1
-                print "current count ", cur_count
-
+    t1 = time.time()
+    c = Crawler('urls2.db', 1000)
+    c.start_crawling()
+    t2 = time.time()
+    print "Time taken : ", int(t2 - t1)
     print "Exiting"
 
