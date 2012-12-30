@@ -29,6 +29,8 @@ class Crawler:
     def start_crawling(self):
         while not self.stop_condition():
             urls            = self.get_uncrawled_urls(self.max_parallel_connections)
+            if not urls:
+                break # there are no unvisited urls in the db. time to stop!
             rdict           = self.link_fetcher.fetch(urls)
             parsed_links    = self.link_fetcher.parse(rdict)
             self.insert_to_db(parsed_links)
@@ -89,7 +91,7 @@ class Crawler:
 
 if __name__=="__main__":
     t1 = time.time()
-    c = Crawler('urls2.db', 1000, 'https://www.irctc.co.in/')
+    c = Crawler('urls2.db', 100, 'http://example.com')
     c.start_crawling()
     t2 = time.time()
     print "Time taken : ", int(t2 - t1), "seconds"
