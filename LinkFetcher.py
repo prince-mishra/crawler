@@ -11,7 +11,7 @@ class LinkFetcher:
     """
     def __init__(self, prefetch = False, max_parallel_connections = 5,
                  valid_content_types = ['text/html'], verify_ssl = True):
-        self.prefetch = prefetch
+        self.prefetch = prefetch #if set to True, content will be downloaded immediately
         self.max_parallel_connections = max_parallel_connections
         self.valid_content_types = valid_content_types
         self.verify_ssl = verify_ssl
@@ -34,12 +34,13 @@ class LinkFetcher:
 
         Case 3:
         If its an HTTPS request, we need to verify SSL certificates
+        This is not supported yet!
 
         We need to get the RESPONSE HEADERS first and content LATER
         """
         rdict = {}
         try:
-            rs = (grequests.get(u) for u in urls) # TODO: add verify ssl support
+            rs = (grequests.get(u) for u in urls) # TODO: add verify_ssl support
             response_objs = grequests.map(rs, self.prefetch, self.max_parallel_connections) #Parallel Fetch
             rdict = dict(zip(urls, response_objs))
         except Exception, fault:
@@ -48,14 +49,12 @@ class LinkFetcher:
         return rdict
 
     def parse(self, rdict):
-        print "parsing"
         links = []
         for url in rdict.keys():
             html    = self.get_html(rdict[url])
             if not html:
                 continue
             a_tags  = self.get_a_tags_from_html(html)
-            print "got a tags", len(a_tags)
             _links  = []
             for a in a_tags:
                 href = a.get('href')
@@ -76,7 +75,7 @@ class LinkFetcher:
                         is_valid_content_type = True
             if  is_valid_content_type and is_valid_status_code:
                 #wow. valid response
-                html        = response_obj.content
+                html = response_obj.content
         except Exception, fault:
             print "Error occured while fetching html"
             print str(fault)
@@ -111,7 +110,7 @@ class LinkFetcher:
             if parsed_href.path or parsed_href.query:
                 temp_url = urlparse.urljoin(url, href)
                 skip_base = True
-            # at this point, we have something like 'http://python.org/assets/docs/about.html#somediv'
+        # at this point, we have something like 'http://python.org/assets/docs/about.html#somediv'
         # temp_url is one valid url.
         # now lets get some more
         if temp_url:
@@ -140,7 +139,8 @@ class LinkFetcher:
     def _path_join(self, base, edge):
         """
          adds edge to base.
-         i.g. it returns foo/bar for (foo, bar) and foo for (foo, '')
+         i.e. it returns foo/bar for (foo, bar) and foo for (foo, '')
+         urljoin() returns foo/baz for (foo/bar, baz)
         """
         return base + '/' + edge if edge else base
 
