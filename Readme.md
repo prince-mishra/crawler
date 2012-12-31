@@ -15,4 +15,17 @@ Greedier - gets all possible urls from a page, even those that don't show up!
 Well, PyCrawler is a real greedy creature!
 If a page has a link to 'http://foo.com/bar/baz', not only will it get 'http://foo.com/bar/baz', but it will also get 'http://foo.com' and 'http://foo.com/bar' as well, which, otherwise, would have been ignored. Cool! Ain't it?  
 
+Usage
+-----
+using crawler is as simple as :
 
+~~~python
+>>> from crawler import Crawler
+>>> db_path = 'crawling.db' # The sqlite database where links will be stored
+>>> max_urls_in_db = 100 # crawler will stop once these many urls get into the db
+>>> start_with_url = 'http://example.com' # If crawler is being run the very first time, this is the starting point.
+>>> c = Crawler(db_path, max_urls_in_db, start_with_url)
+>>> c.start_crawling()
+~~~
+
+Yes. thats it!
