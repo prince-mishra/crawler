@@ -87,7 +87,10 @@ class Crawler:
         return ret
 
     def stop_condition(self):
-        return self.total_links_count() > self.max_urls
+        condition = self.total_links_count() > self.max_urls
+        if condition:
+            print "Max count reached."
+        return condition
 
 if __name__=="__main__":
     t1 = time.time()
